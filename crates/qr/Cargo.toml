@@ -1,7 +1,8 @@
 [package]
 name = "roka-qr"
 version = "0.0.1"
-edition = "2021"
+edition = "2024"
+rust-version = "1.85"
 description = "Zero-dependency QR code encoder + decoder with built-in PNG/PBM I/O. (placeholder release — see 0.1.0)"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/goliajp/roka"
@@ -14,3 +15,10 @@ readme = "README.md"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "codec"
+harness = false
