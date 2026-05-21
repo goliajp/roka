@@ -1,0 +1,16 @@
+[package]
+name = "roka-totp"
+version = "0.0.1"
+edition = "2021"
+description = "Zero-dependency TOTP / HOTP with optional QR code support. (placeholder release — see 0.1.0)"
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/goliajp/roka"
+homepage = "https://github.com/goliajp/roka"
+documentation = "https://docs.rs/roka-totp"
+authors = ["GOLIA K.K."]
+keywords = ["totp", "hotp", "otp", "2fa", "authentication"]
+categories = ["authentication", "cryptography"]
+readme = "README.md"
+
+[lints]
+workspace = true

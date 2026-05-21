@@ -2,20 +2,35 @@
 
 > コインロッカー — deposit a secret, retrieve a one-time code.
 
-Zero-dependency QR + TOTP toolkit for Rust. Two crates:
+**Roka** is a 2FA authenticator product. The product binary lives in this
+repository alongside the open-source library crates it's built on.
 
-| Crate | What it does |
-|-------|--------------|
-| [`roka-qr`](roka-qr/) | QR code encoder + decoder with built-in PNG/PBM I/O. Pure Rust, `std` only. |
-| [`roka-totp`](roka-totp/) | TOTP / HOTP with optional QR code generation and scanning (via `roka-qr`). |
+## Layout
+
+```
+roka/
+├── crates/
+│   ├── qr/            ← published as `roka-qr` on crates.io
+│   ├── totp/          ← published as `roka-totp` on crates.io
+│   └── app/           ← the `roka` product binary (publish = false; coming next)
+└── Cargo.toml         ← workspace root
+```
+
+## Crates
+
+| Crate | Published | What it does |
+|-------|-----------|--------------|
+| [`roka-qr`](crates/qr/) | ✅ crates.io | Zero-dependency QR encoder + decoder with built-in PNG/PBM I/O. |
+| [`roka-totp`](crates/totp/) | ✅ crates.io | Zero-dependency TOTP / HOTP with optional QR code generation and scanning (via `roka-qr`). |
+| `roka` | ❌ binary | The product itself — CLI now, possibly GUI later. Uses both crates above. |
 
 ## Status
 
 🚧 **0.0.1 placeholder releases only.** The real 0.1.0 ships after API polish.
-Source for the working prototype lives in the
+Working prototype lives in the
 [`lab10-2fa`](https://github.com/goliajp/labs) experimental lab.
 
-## Goals
+## Goals for the library crates
 
 - **Zero external crate dependencies.** Only `std`.
 - **No unsafe.**

@@ -1,12 +1,13 @@
 [workspace]
 resolver = "2"
-members = ["roka-qr", "roka-totp"]
+members = [
+    "crates/qr",
+    "crates/totp",
+    # crates/app will land here when lab10-2fa reorganizes in — that's the `roka` product binary.
+]
 
-[workspace.package]
-version = "0.0.1"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/goliajp/roka"
-homepage = "https://github.com/goliajp/roka"
-authors = ["GOLIA Inc. <oss@golia.jp>"]
-rust-version = "1.70"
+[workspace.lints.rust]
+warnings = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny" }
