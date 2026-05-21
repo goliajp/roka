@@ -1,0 +1,13 @@
+[package]
+name = "roka-totp"
+description = "Zero-dependency TOTP / HOTP with optional QR code support. (placeholder release — see 0.1.0)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+readme = "README.md"
+keywords = ["totp", "hotp", "otp", "2fa", "authentication"]
+categories = ["authentication", "cryptography"]
