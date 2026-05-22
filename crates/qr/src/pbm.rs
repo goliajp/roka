@@ -160,76 +160,81 @@ fn is_pbm_whitespace(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | b'\r' | b'\x0B' | b'\x0C')
 }
 
-/// 解析 P1 PBM。容错：忽略 '#' 起头的注释（直到行尾）、忽略多余空白。
+/// 解析 P1 PBM（ASCII 位图）。
+///
+/// 优化：直接按字节扫描，不分配中间 `String` token——每个 bit 字符（'0' / '1'）
+/// 找到后立刻写入 Bitmap。忽略 `#`-起头的行尾注释和任意 ASCII 空白。
 pub fn read_p1(input: &str) -> Result<Bitmap, &'static str> {
-    let tokens = tokenize_pbm(input);
-    let mut it = tokens.into_iter();
-    let header = it.next().ok_or("empty PBM")?;
-    if header != "P1" {
+    let bytes = input.as_bytes();
+    let mut pos = 0usize;
+
+    // Magic "P1"
+    skip_ws_and_comments(bytes, &mut pos);
+    if pos + 2 > bytes.len() || &bytes[pos..pos + 2] != b"P1" {
         return Err("only P1 (ASCII bitmap) supported");
     }
-    let w: usize = it
-        .next()
-        .ok_or("missing width")?
-        .parse()
-        .map_err(|_| "bad width")?;
-    let h: usize = it
-        .next()
-        .ok_or("missing height")?
-        .parse()
-        .map_err(|_| "bad height")?;
+    pos += 2;
+    // P1 必须后接空白或 EOF
+    if pos < bytes.len() && !is_pbm_whitespace(bytes[pos]) && bytes[pos] != b'#' {
+        return Err("P1 magic not followed by whitespace");
+    }
+
+    let w = parse_dec_uint(bytes, &mut pos).ok_or("missing/bad width")?;
+    let h = parse_dec_uint(bytes, &mut pos).ok_or("missing/bad height")?;
     let mut bitmap = Bitmap::new(w, h);
+
     for y in 0..h {
         for x in 0..w {
-            let t = it.next().ok_or("truncated bitmap")?;
-            // 标准 P1 是单字符 0/1 token；netpbm 也允许多 token 间无分隔。
-            // 这里既支持 "1 0 1 0"，也支持 "1010"。
-            if t.len() == 1 {
-                match t.as_str() {
-                    "0" => bitmap.set(x, y, false),
-                    "1" => bitmap.set(x, y, true),
-                    _ => return Err("invalid bit"),
-                }
-            } else {
-                // 多字符 token（罕见但合法）：暂不支持，建议生成方按空白分割。
-                return Err("multi-char PBM tokens not supported—separate bits with whitespace");
+            skip_ws_and_comments(bytes, &mut pos);
+            if pos >= bytes.len() {
+                return Err("truncated bitmap");
             }
+            match bytes[pos] {
+                b'0' => {} // already false
+                b'1' => bitmap.set(x, y, true),
+                _ => return Err("invalid bit (expected '0' or '1')"),
+            }
+            pos += 1;
         }
     }
     Ok(bitmap)
 }
 
-/// 分词：每个 token 是连续非空白非 '#' 的字符。'#' 起头注释直到行尾。
-fn tokenize_pbm(input: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut buf = String::new();
-    let mut in_comment = false;
-    for ch in input.chars() {
-        if in_comment {
-            if ch == '\n' {
-                in_comment = false;
-            }
-            continue;
+/// 跳过 ASCII 空白 + `#…\n` 风格的行尾注释。
+fn skip_ws_and_comments(bytes: &[u8], pos: &mut usize) {
+    loop {
+        if *pos >= bytes.len() {
+            return;
         }
-        if ch == '#' {
-            in_comment = true;
-            if !buf.is_empty() {
-                tokens.push(std::mem::take(&mut buf));
+        let c = bytes[*pos];
+        if c == b'#' {
+            while *pos < bytes.len() && bytes[*pos] != b'\n' {
+                *pos += 1;
             }
-            continue;
-        }
-        if ch.is_whitespace() {
-            if !buf.is_empty() {
-                tokens.push(std::mem::take(&mut buf));
-            }
+        } else if is_pbm_whitespace(c) {
+            *pos += 1;
         } else {
-            buf.push(ch);
+            return;
         }
     }
-    if !buf.is_empty() {
-        tokens.push(buf);
+}
+
+/// 跳过前导空白/注释，然后解析一个十进制无符号整数。
+fn parse_dec_uint(bytes: &[u8], pos: &mut usize) -> Option<usize> {
+    skip_ws_and_comments(bytes, pos);
+    let start = *pos;
+    let mut v: usize = 0;
+    let mut had_digit = false;
+    while *pos < bytes.len() && bytes[*pos].is_ascii_digit() {
+        v = v.checked_mul(10)?.checked_add((bytes[*pos] - b'0') as usize)?;
+        had_digit = true;
+        *pos += 1;
     }
-    tokens
+    if !had_digit {
+        return None;
+    }
+    let _ = start;
+    Some(v)
 }
 
 #[cfg(test)]
