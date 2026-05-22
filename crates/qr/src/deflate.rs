@@ -85,6 +85,40 @@ impl<'a> BitReader<'a> {
         }
         Ok(val)
     }
+    /// 偷看 n 个 bit（不消耗）。返回 None 表示剩余 bit 不够（来到流末尾）。
+    /// 注意：DEFLATE bit 流是 LSB-first per byte，所以"先读到的 bit"就是结果的低位。
+    /// 但 Huffman 码要 MSB-first 拼，所以 fast_path 表索引时需要把这 n bit 反转。
+    ///
+    /// 这里我们用一个简单约定：返回的 u32 把"先读到的 bit"放在最高位
+    /// （= 反过来）。这样 Huffman fast table 直接拿这 n bit 当 MSB-first index。
+    pub fn peek_msb_bits(&self, n: usize) -> Option<u32> {
+        let mut val = 0u32;
+        let mut byte_pos = self.byte_pos;
+        let mut bit_pos = self.bit_pos;
+        for i in 0..n {
+            if byte_pos >= self.data.len() {
+                return None;
+            }
+            let bit = (self.data[byte_pos] >> bit_pos) & 1;
+            // 把这一 bit 放进 val 的"逻辑高位"——表示这是 Huffman 码的早期 bit。
+            // n-1-i 是从高到低的位置。
+            val |= (bit as u32) << (n - 1 - i);
+            bit_pos += 1;
+            if bit_pos == 8 {
+                bit_pos = 0;
+                byte_pos += 1;
+            }
+        }
+        Some(val)
+    }
+
+    /// 消耗 n 个 bit（推进位置，不返回值）。配合 peek_msb_bits 使用。
+    pub fn consume_bits(&mut self, n: usize) {
+        let total = self.bit_pos as usize + n;
+        self.byte_pos += total / 8;
+        self.bit_pos = (total % 8) as u8;
+    }
+
     /// 跳到下一个字节边界。
     fn align_to_byte(&mut self) {
         if self.bit_pos != 0 {
@@ -121,14 +155,31 @@ fn inflate_stored(br: &mut BitReader, out: &mut Vec<u8>) -> Result<(), &'static 
 
 // ───────────────────────────── Canonical Huffman ─────────────────────────────
 
-/// 一个 Huffman 解码表：按"码长"分组的 (code, symbol) 对。
+/// Canonical Huffman 解码表，带 9-bit 直接查表 fast path。
 ///
-/// 读 bit 时按 MSB-first 拼码（第一位读到 = 码的最高位）；在长度 L 处查表，找到匹配即停。
+/// # 解码原理
+///
+/// 读 bit 时按 MSB-first 拼码（第一位读到 = 码的最高位）。Canonical Huffman 的性质：
+/// 同一长度的码是连续整数，所以只需要知道每个长度的"起始码"和"该长度有几个码"，就能
+/// 用 O(1) 的算术（不是查表）反推出 symbol。
+///
+/// 进一步加速：把前 9 个 bit 当 index 直接查 512 项表——绝大多数 PNG 字面值都 ≤ 9 bit，
+/// 一次 load 就能解码完毕。只有少数 long code（10..15 bit）才走 fallback 慢路径。
 pub struct HuffmanTable {
-    /// `by_len[L]` = 长度 L 的所有 (code, symbol) 对（按 code 升序）。索引 0 永远空。
-    by_len: Vec<Vec<(u16, u16)>>,
+    /// 长度 L 的起始码值（canonical 顺序）。`base_code[L]` 对应该长度的最小码。
+    base_code: [u32; 16],
+    /// 长度 L 的累计 symbol 偏移：长度 ≤ L 的总 symbol 数。`base_sym[L]` = sum(count[1..L])。
+    base_sym: [u32; 16],
+    /// canonical 顺序排列的所有 symbol。decode 时根据 (len, code) 反查
+    /// `symbols[base_sym[len] + (code - base_code[len])]`。
+    symbols: Vec<u16>,
+    /// 9-bit fast path。索引是 9 个 bit 当 u16；entry 高 8 bit 是码长（0 = miss），
+    /// 低 8 bit 是 symbol 值（< 256）；对于 sym ≥ 256 用单独的 fast_path_sym 表。
+    fast_path: [u32; 512],
     max_len: usize,
 }
+
+const FAST_PATH_BITS: usize = 9;
 
 impl HuffmanTable {
     /// 从"每个 symbol 的码长"构建解码表（RFC 1951 §3.2.2 标准 canonical Huffman 算法）。
@@ -136,47 +187,117 @@ impl HuffmanTable {
         let max_len = *lengths.iter().max().unwrap_or(&0) as usize;
         if max_len == 0 {
             return Ok(Self {
-                by_len: vec![Vec::new()],
+                base_code: [0; 16],
+                base_sym: [0; 16],
+                symbols: Vec::new(),
+                fast_path: [0; 512],
                 max_len: 0,
             });
         }
+        if max_len > 15 {
+            return Err("DEFLATE: Huffman code length exceeds 15");
+        }
         // 1. 计每个长度的码数。
-        let mut bl_count = vec![0u32; max_len + 1];
+        let mut count = [0u32; 16];
         for &l in lengths {
             if l > 0 {
-                bl_count[l as usize] += 1;
+                count[l as usize] += 1;
             }
         }
-        // 2. 每个长度的"起始码值"（RFC 1951 §3.2.2 步骤 2）
-        let mut next_code = vec![0u32; max_len + 1];
+        // 2. 每个长度的"起始码值"（RFC 1951 §3.2.2 步骤 2）。
+        let mut base_code = [0u32; 16];
         let mut code = 0u32;
         for bits in 1..=max_len {
-            code = (code + bl_count[bits - 1]) << 1;
-            next_code[bits] = code;
+            code = (code + count[bits - 1]) << 1;
+            base_code[bits] = code;
         }
-        // 3. 给每个 symbol 分配码。
-        let mut by_len: Vec<Vec<(u16, u16)>> = vec![Vec::new(); max_len + 1];
+        // 3. 按 (len, sym_in_input_order) 给出 canonical symbol 顺序。
+        //    base_sym[len] = 长度 < len 的 symbol 总数。
+        let mut base_sym = [0u32; 16];
+        for bits in 1..=max_len {
+            base_sym[bits] = base_sym[bits - 1] + count[bits - 1];
+        }
+        let total: usize = count.iter().sum::<u32>() as usize;
+        let mut symbols = vec![0u16; total];
+        let mut next = base_sym;
         for (sym, &l) in lengths.iter().enumerate() {
             if l > 0 {
-                let c = next_code[l as usize];
-                by_len[l as usize].push((c as u16, sym as u16));
-                next_code[l as usize] += 1;
+                symbols[next[l as usize] as usize] = sym as u16;
+                next[l as usize] += 1;
             }
         }
-        // 每个 length 列表保持递增（由构造方式天然保证）。
-        Ok(Self { by_len, max_len })
+        // 4. 9-bit fast path：对每个 ≤ 9 bit 的 symbol，把它在所有"以这个码为前缀"的
+        //    9-bit 表项处都写入 (len << 16) | sym。其余项保持 0（=miss，走 slow path）。
+        let mut fast_path = [0u32; 1 << FAST_PATH_BITS];
+        for sym_idx in 0..symbols.len() {
+            // 找出该 symbol 的长度。倒推：sym_idx 落在 base_sym[len]..base_sym[len+1]
+            let mut len = 1usize;
+            while len <= max_len {
+                let next_base = if len < max_len {
+                    base_sym[len + 1]
+                } else {
+                    total as u32
+                };
+                if (sym_idx as u32) < next_base {
+                    break;
+                }
+                len += 1;
+            }
+            if len > FAST_PATH_BITS {
+                continue; // long code, slow path only
+            }
+            // 该 symbol 的码值
+            let c = base_code[len] + (sym_idx as u32 - base_sym[len]);
+            let entry = ((len as u32) << 16) | (symbols[sym_idx] as u32);
+            // 把 c 用 9 个 bit 表示——code 是 len bit MSB-first；后面 (FAST_PATH_BITS - len)
+            // bit 任意，意味着所有以这个 code 为前缀的 9-bit 模式都映射到此 symbol。
+            let shift = FAST_PATH_BITS - len;
+            let base_idx = (c << shift) as usize;
+            let span = 1usize << shift;
+            for k in 0..span {
+                fast_path[base_idx + k] = entry;
+            }
+        }
+        Ok(Self {
+            base_code,
+            base_sym,
+            symbols,
+            fast_path,
+            max_len,
+        })
     }
 
     /// 读一个码并解码为 symbol。
     pub fn decode(&self, br: &mut BitReader) -> Result<u16, &'static str> {
-        let mut code = 0u16;
+        // Fast path: peek 9 bits, look up table. 但 BitReader 没 peek，所以这里实际是先 read
+        // 9 bit 拼成 index（MSB-first），查表；若 miss，已经吃掉的 bit 不能退回——所以慢路径
+        // 必须能基于这 9 bit 继续往后接。
+        //
+        // 简化：fast path 只在能保证 ≥ FAST_PATH_BITS bit 可读时启用。否则走 slow。
+        let peek = br.peek_msb_bits(FAST_PATH_BITS);
+        if let Some(peek_val) = peek {
+            let entry = self.fast_path[peek_val as usize];
+            if entry != 0 {
+                let len = (entry >> 16) as u8;
+                br.consume_bits(len as usize);
+                return Ok((entry & 0xFFFF) as u16);
+            }
+        }
+        // Slow path: bit-by-bit, identical to before but using canonical lookup
+        let mut code = 0u32;
         for len in 1..=self.max_len {
-            let bit = br.read_bits(1)? as u16;
+            let bit = br.read_bits(1)?;
             code = (code << 1) | bit;
-            // 在 by_len[len] 里找 code
-            for &(c, s) in &self.by_len[len] {
-                if c == code {
-                    return Ok(s);
+            let base = self.base_code[len];
+            let next_base = if len < self.max_len {
+                self.base_code[len + 1] >> 1
+            } else {
+                code + 1
+            };
+            if code >= base && code < next_base {
+                let sym_idx = self.base_sym[len] + (code - base);
+                if (sym_idx as usize) < self.symbols.len() {
+                    return Ok(self.symbols[sym_idx as usize]);
                 }
             }
         }
