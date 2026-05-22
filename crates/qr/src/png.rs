@@ -65,17 +65,41 @@ pub fn encode_grayscale(bitmap: &Bitmap) -> Vec<u8> {
     out.push(0x78); // CMF
     out.push(0x01); // FLG
 
-    // 预组装"raw"扁平 buffer：每行 = filter(0) + pixel 字节。
-    // 每个像素一次 push；编译器应能对 bool→u8 映射做向量化。
+    // 预组装"raw"扁平 buffer + 同时 streaming Adler-32（合并 2 passes 为 1）。
+    // 之后再把 raw 切块写入 out。bool→u8 的转换让编译器对该行做向量化。
     let mut raw = Vec::with_capacity(raw_len);
+    let mut adler_a: u32 = 1;
+    let mut adler_b: u32 = 0;
+    let mut adler_since_mod = 0usize;
+    const ADLER_NMAX: usize = 5552;
     for y in 0..bitmap.height {
-        raw.push(0u8); // filter None
+        // Filter byte 0：写入 raw + 更新 adler（a += 0，b += a）
+        raw.push(0u8);
+        adler_b = adler_b.wrapping_add(adler_a);
+        adler_since_mod += 1;
         let row_slice = &bitmap.pixels[y * bitmap.width..(y + 1) * bitmap.width];
-        raw.extend(row_slice.iter().map(|&px| if px { 0u8 } else { 255 }));
+        // 行内紧循环：bool → u8 + adler 更新。无 bounds check（raw 已 reserve 容量；
+        // 但 push() 仍检查。pixels 用 iter() 也没 bounds check）。
+        for &px in row_slice {
+            let v: u8 = if px { 0 } else { 255 };
+            raw.push(v);
+            adler_a = adler_a.wrapping_add(v as u32);
+            adler_b = adler_b.wrapping_add(adler_a);
+            adler_since_mod += 1;
+        }
+        // 每行末 check 是否需要 mod（避免每像素检查的分支）
+        if adler_since_mod >= ADLER_NMAX {
+            adler_a %= 65521;
+            adler_b %= 65521;
+            adler_since_mod = 0;
+        }
     }
     debug_assert_eq!(raw.len(), raw_len);
+    adler_a %= 65521;
+    adler_b %= 65521;
+    let adler = (adler_b << 16) | adler_a;
 
-    // 写 stored 块（每块最多 65535 字节）
+    // 写 stored 块：现在只是 memcpy raw → out（无需再走 adler）
     let mut i = 0usize;
     while i < raw.len() {
         let this_block = (raw.len() - i).min(65535);
@@ -87,8 +111,7 @@ pub fn encode_grayscale(bitmap: &Bitmap) -> Vec<u8> {
         i += this_block;
     }
 
-    // Adler-32 over raw（deferred mod 每 5552 字节）
-    out.extend_from_slice(&adler32(&raw).to_be_bytes());
+    out.extend_from_slice(&adler.to_be_bytes());
 
     // patch IDAT length + CRC
     let idat_body_len = (out.len() - idat_body_start) as u32;
