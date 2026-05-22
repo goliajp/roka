@@ -22,7 +22,27 @@ roka/
 |-------|-----------|--------------|
 | [`roka-qr`](crates/qr/) | ✅ crates.io | Zero-dependency QR encoder + decoder with built-in PNG/PBM I/O. |
 | [`roka-totp`](crates/totp/) | ✅ crates.io | Zero-dependency TOTP / HOTP with optional QR code generation and scanning (via `roka-qr`). |
+| [`roka-wasm`](crates/wasm/) | internal (`publish = false`) | wasm-bindgen surface around the two crates above; the deployable artifact is the `.wasm` bundle in [`web/pkg/`](web/pkg/). |
 | `roka` | ❌ binary | The product itself — CLI now, possibly GUI later. Uses both crates above. |
+
+## PWA (v1.0-α)
+
+A WASM-powered static PWA lives in [`web/`](web/). Open `web/index.html` after
+running a local HTTP server (see below). Add an account by pasting an
+`otpauth://` URI or filling the three fields; the page refreshes every second.
+
+```bash
+# Build the WASM bundle (one-time / on changes)
+./web/build.sh
+
+# Serve locally
+cd web && python3 -m http.server 6003
+# → open http://127.0.0.1:6003
+```
+
+> ⚠️ **v1.0-α stores secrets in browser `localStorage` cleartext.** Vault
+> crate with master-password encryption arrives in v1.0-β. Do not use this for
+> production accounts yet.
 
 ## Status
 

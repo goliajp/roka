@@ -1,0 +1,27 @@
+[package]
+name = "roka-wasm"
+version = "0.0.1"
+edition = "2024"
+description = "WASM bindings around roka-totp + roka-qr. Powers the Roka PWA / browser extension."
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/goliajp/roka"
+homepage = "https://github.com/goliajp/roka"
+authors = ["GOLIA K.K."]
+publish = false      # internal — distributed as the .wasm bundle, not as a crate
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+roka-totp = { path = "../totp" }
+roka-qr = { path = "../qr" }
+wasm-bindgen = "0.2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

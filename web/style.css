@@ -1,0 +1,725 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+ *  Roka · style.css
+ *  ─────────────────
+ *  Aesthetic: "コインロッカー × 駅前掲示板" — refined industrial terminal.
+ *  Dark concrete + steel base, amber LED-style readouts (the OTP code), and
+ *  vermilion transit-signage accents (the alpha warning + the active-card stripe).
+ *
+ *  Three typefaces:
+ *    • Big Shoulders Display — industrial signage display (wordmark, headings)
+ *    • Geist                 — refined geometric sans for body text
+ *    • JetBrains Mono        — code-feel mono, OTP digits live here
+ *
+ *  The OTP card structure (rendered by app.js):
+ *
+ *    <li class="account-card">
+ *      <div class="account-card__meta">
+ *        <div class="account-card__issuer">…</div>
+ *        <div class="account-card__account">…</div>
+ *      </div>
+ *      <button class="account-card__code">123 456</button>
+ *      <div class="account-card__countdown">
+ *        <svg class="countdown-ring">…</svg>
+ *        <span class="countdown-ring__label">23</span>
+ *      </div>
+ *      <button class="account-card__remove">×</button>
+ *    </li>
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@400;700;900&family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+/* ── design tokens ────────────────────────────────────────────────────────── */
+:root {
+  /* spatial */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-8: 3rem;
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --max-width: 32rem;
+
+  /* surface — graphite tunnel palette */
+  --bg-base:        #0c0e11;
+  --bg-elevated:    #15171c;
+  --bg-elevated-2:  #1c1f25;
+  --bg-input:       #0a0c0f;
+  --border-subtle:  rgba(255, 255, 255, 0.06);
+  --border-strong:  rgba(255, 255, 255, 0.12);
+  --highlight-top:  rgba(255, 255, 255, 0.04);
+
+  /* text */
+  --text-primary:   #ebecef;
+  --text-secondary: #9a9da4;
+  --text-tertiary:  #5d6068;
+  --text-muted:     #3d4046;
+
+  /* accents */
+  --amber:        #ffb53a;        /* LED-style OTP digits */
+  --amber-glow:   rgba(255, 181, 58, 0.42);
+  --amber-dim:    #c98818;
+  --vermilion:    #d94340;        /* alpha warning, transit-stripe */
+  --vermilion-dim: rgba(217, 67, 64, 0.16);
+  --cyan-late:    #4fd1c5;        /* "fresh code" cool tone */
+  --warn-late:    #ff6f55;        /* < 5s warning blush */
+
+  /* motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in:  cubic-bezier(0.7, 0, 0.84, 0);
+  --dur-fast: 140ms;
+  --dur-med:  240ms;
+  --dur-slow: 520ms;
+}
+
+/* ── reset ─────────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+ul, ol     { list-style: none; margin: 0; padding: 0; }
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+input {
+  font: inherit;
+  color: inherit;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* ── canvas — concrete-tunnel atmosphere ──────────────────────────────────── */
+html {
+  background: var(--bg-base);
+  color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  min-height: 100dvh;
+  font-family: 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--bg-base);
+  /* layered atmosphere:
+     1. radial warmth at top-left (a station-platform lamp)
+     2. radial cool at bottom-right (the far tunnel)
+     3. faint horizontal scanline grid (transit-board feel)            */
+  background-image:
+    radial-gradient(800px 480px at 0% -10%, rgba(255, 181, 58, 0.06), transparent 60%),
+    radial-gradient(900px 600px at 100% 110%, rgba(79, 209, 197, 0.04), transparent 60%),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 2px,
+      rgba(255, 255, 255, 0.012) 2px 3px
+    );
+  background-attachment: fixed;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-5) var(--space-4) var(--space-8);
+  gap: var(--space-6);
+}
+
+::selection {
+  background: var(--amber);
+  color: var(--bg-base);
+}
+
+/* ── topbar ───────────────────────────────────────────────────────────────── */
+.topbar {
+  width: 100%;
+  max-width: var(--max-width);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.topbar h1 {
+  margin: 0;
+  font-family: 'Big Shoulders Display', sans-serif;
+  font-weight: 900;
+  font-size: clamp(2.5rem, 8vw, 3.5rem);
+  letter-spacing: 0.06em;
+  line-height: 0.85;
+  color: var(--text-primary);
+  position: relative;
+  /* tiny accent: a thin vermilion stripe under the wordmark, transit-style */
+}
+.topbar h1::after {
+  content: '';
+  display: block;
+  margin-top: var(--space-2);
+  width: 2.2rem;
+  height: 3px;
+  background: var(--vermilion);
+}
+
+.brand {
+  display: inline-block;
+}
+/* Japanese small tag — embraces the metaphor without going over */
+.brand::after {
+  content: 'ろか';
+  margin-left: 0.6rem;
+  font-family: 'Geist', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  color: var(--text-tertiary);
+  vertical-align: 0.45em;
+}
+
+/* alpha banner — vermilion alert pill */
+.alpha-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: var(--vermilion-dim);
+  border-left: 3px solid var(--vermilion);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.alpha-banner strong {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  color: var(--vermilion);
+  text-transform: uppercase;
+}
+.alpha-banner code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+.alpha-banner a {
+  margin-left: auto;
+  color: var(--vermilion);
+  font-weight: 500;
+  font-size: 0.82rem;
+  border-bottom: 1px dotted currentColor;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.alpha-banner a:hover { color: var(--text-primary); }
+
+/* ── main column ──────────────────────────────────────────────────────────── */
+main {
+  width: 100%;
+  max-width: var(--max-width);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* ── empty state — like an unrented locker ───────────────────────────────── */
+.empty {
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6) var(--space-5);
+  text-align: center;
+  color: var(--text-secondary);
+  background:
+    repeating-linear-gradient(
+      45deg,
+      transparent 0 10px,
+      rgba(255, 255, 255, 0.012) 10px 11px
+    );
+}
+.empty.hidden { display: none; }
+.empty h2 {
+  margin: 0 0 var(--space-2);
+  font-family: 'Big Shoulders Display', sans-serif;
+  font-weight: 700;
+  font-size: 1.4rem;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
+}
+.empty p { margin: 0; font-size: 0.92rem; }
+.empty code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.86em;
+  padding: 0.05em 0.35em;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+}
+
+/* ── accounts list ────────────────────────────────────────────────────────── */
+.accounts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.account-card {
+  /* the "locker door" — a 3-column grid: meta | code+countdown | remove */
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  grid-template-rows: auto;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  background:
+    linear-gradient(180deg, var(--bg-elevated-2) 0%, var(--bg-elevated) 100%);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--amber-dim);
+  border-radius: var(--radius-md);
+  position: relative;
+  isolation: isolate;
+  transition:
+    transform var(--dur-med) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-med) var(--ease-out);
+  /* staggered entrance */
+  animation: cardSlideIn var(--dur-slow) var(--ease-out) both;
+}
+.account-card:nth-child(1) { animation-delay: 0ms; }
+.account-card:nth-child(2) { animation-delay: 60ms; }
+.account-card:nth-child(3) { animation-delay: 120ms; }
+.account-card:nth-child(4) { animation-delay: 180ms; }
+.account-card:nth-child(5) { animation-delay: 240ms; }
+.account-card:nth-child(n+6) { animation-delay: 300ms; }
+
+.account-card::before {
+  /* top specular highlight — like light catching the edge of a steel door */
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: var(--highlight-top);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  pointer-events: none;
+}
+
+.account-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--border-strong);
+  border-left-color: var(--amber);
+  box-shadow:
+    0 10px 30px -12px rgba(0, 0, 0, 0.6),
+    0 4px 12px -6px rgba(0, 0, 0, 0.45);
+}
+
+.account-card.warning {
+  border-left-color: var(--warn-late);
+}
+
+.account-card__meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-card__issuer {
+  font-family: 'Big Shoulders Display', sans-serif;
+  font-weight: 700;
+  font-size: 0.92rem;
+  letter-spacing: 0.05em;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+
+.account-card__account {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── the LED departure board — the OTP code ───────────────────────────────── */
+.account-card__code {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: clamp(1.4rem, 4.6vw, 1.85rem);
+  letter-spacing: 0.12em;
+  color: var(--amber);
+  text-shadow: 0 0 18px var(--amber-glow);
+  /* a subtle inset to make it feel like an inset LED display */
+  background: rgba(0, 0, 0, 0.45);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 181, 58, 0.08);
+  cursor: pointer;
+  user-select: all;
+  -webkit-user-select: all;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-med) var(--ease-out),
+    text-shadow var(--dur-med) var(--ease-out);
+  /* a soft glow that pulses subtly forever (LED breathing) */
+  animation: ledBreathe 4s ease-in-out infinite;
+}
+.account-card__code:hover {
+  transform: scale(1.02);
+  background: rgba(0, 0, 0, 0.6);
+}
+.account-card__code:active {
+  transform: scale(0.98);
+}
+
+/* fresh-code state — runs briefly when the window resets */
+.account-card__code.fresh {
+  animation: codeFlip var(--dur-slow) var(--ease-out);
+  color: var(--cyan-late);
+  text-shadow: 0 0 22px rgba(79, 209, 197, 0.45);
+}
+.account-card__code.warning {
+  color: var(--warn-late);
+  text-shadow: 0 0 22px rgba(255, 111, 85, 0.45);
+  animation: ledBreathe 1.2s ease-in-out infinite;
+}
+.account-card__code.copied {
+  animation: codeCopied 600ms var(--ease-out);
+}
+
+/* ── countdown ring (SVG) ─────────────────────────────────────────────────── */
+.account-card__countdown {
+  position: relative;
+  width: 2.4rem;
+  height: 2.4rem;
+  display: grid;
+  place-items: center;
+}
+
+.countdown-ring {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.countdown-ring__track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.07);
+  stroke-width: 2.6;
+}
+.countdown-ring__fill {
+  fill: none;
+  stroke: var(--amber);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-dasharray: 94.25; /* 2 * π * r where r = 15 */
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 1s linear, stroke 200ms var(--ease-out);
+}
+.account-card.warning .countdown-ring__fill {
+  stroke: var(--warn-late);
+}
+
+.countdown-ring__label {
+  position: absolute;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+/* ── remove button — minimal ghost cross ──────────────────────────────────── */
+.account-card__remove {
+  width: 1.8rem;
+  height: 1.8rem;
+  display: grid;
+  place-items: center;
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  border-radius: 50%;
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+.account-card:hover .account-card__remove,
+.account-card:focus-within .account-card__remove {
+  opacity: 1;
+}
+.account-card__remove:hover {
+  color: var(--vermilion);
+  background: var(--vermilion-dim);
+}
+
+/* ── add form — the locker rental panel ───────────────────────────────────── */
+.add-form {
+  background:
+    linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-elevated-2) 100%);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  position: relative;
+}
+.add-form::before {
+  /* top stripe — like the colored band on transit ticket machines */
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--amber) 0%, var(--amber) 30%, var(--vermilion) 30%, var(--vermilion) 50%, transparent 50%);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.add-form h2 {
+  margin: var(--space-2) 0 0;
+  font-family: 'Big Shoulders Display', sans-serif;
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+
+.add-form .hint {
+  margin: 0 0 var(--space-2);
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+}
+.add-form .hint code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82em;
+  padding: 0.05em 0.35em;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+  color: var(--text-primary);
+}
+
+.add-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.74rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.add-form .row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.add-form input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-3);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.88rem;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.add-form input::placeholder {
+  color: var(--text-muted);
+  font-style: normal;
+}
+.add-form input:hover {
+  border-color: var(--border-strong);
+}
+.add-form input:focus {
+  outline: none;
+  border-color: var(--amber);
+  background: #000000;
+  box-shadow: 0 0 0 3px rgba(255, 181, 58, 0.12);
+}
+
+.add-form .separator {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-1) 0;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+}
+.add-form .separator::before,
+.add-form .separator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+#add-btn {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  font-family: 'Big Shoulders Display', sans-serif;
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--bg-base);
+  background: var(--amber);
+  border-radius: var(--radius-sm);
+  position: relative;
+  overflow: hidden;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+#add-btn:hover {
+  background: #ffc966;
+  box-shadow: 0 6px 20px -6px var(--amber-glow);
+}
+#add-btn:active {
+  transform: translateY(1px);
+  box-shadow: 0 2px 8px -4px var(--amber-glow);
+}
+#add-btn::after {
+  /* shimmer that crosses the button on hover */
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.5) 50%,
+    transparent 70%
+  );
+  transform: translateX(-110%);
+  transition: transform 800ms var(--ease-out);
+  pointer-events: none;
+}
+#add-btn:hover::after {
+  transform: translateX(110%);
+}
+
+.error {
+  min-height: 1.2rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  color: var(--vermilion);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.error.visible { opacity: 1; }
+
+/* ── footer ──────────────────────────────────────────────────────────────── */
+footer {
+  width: 100%;
+  max-width: var(--max-width);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.04em;
+}
+footer a {
+  color: var(--text-tertiary);
+  border-bottom: 1px dotted transparent;
+  transition: color var(--dur-fast), border-color var(--dur-fast);
+}
+footer a:hover {
+  color: var(--amber);
+  border-bottom-color: var(--amber-dim);
+}
+
+/* ── focus ring (universal) ──────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ── animations ──────────────────────────────────────────────────────────── */
+@keyframes cardSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ledBreathe {
+  0%, 100% { text-shadow: 0 0 12px var(--amber-glow); }
+  50%      { text-shadow: 0 0 22px var(--amber-glow); }
+}
+
+@keyframes codeFlip {
+  0%   { transform: scale(0.92) rotateX(-30deg); opacity: 0; }
+  100% { transform: scale(1) rotateX(0); opacity: 1; }
+}
+
+@keyframes codeCopied {
+  0%   { color: var(--cyan-late); text-shadow: 0 0 30px rgba(79, 209, 197, 0.6); transform: scale(1.05); }
+  100% { color: var(--amber); text-shadow: 0 0 18px var(--amber-glow); transform: scale(1); }
+}
+
+/* ── reduced motion: drop the breathing, the flips, the stagger ──────────── */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .account-card__code { animation: none; }
+}
+
+/* ── narrow phones — collapse 2-column row to 1 ──────────────────────────── */
+@media (max-width: 28rem) {
+  .add-form .row {
+    grid-template-columns: 1fr;
+  }
+  .account-card {
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    row-gap: var(--space-3);
+  }
+  .account-card__meta {
+    grid-column: 1 / -1;
+  }
+  .account-card__code {
+    grid-column: 1;
+  }
+  .account-card__countdown {
+    grid-column: 2;
+  }
+  .account-card__remove {
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-2);
+  }
+}
+
+/* ── wide screens — cap width but center generously ──────────────────────── */
+@media (min-width: 768px) {
+  body { padding: var(--space-8) var(--space-5); }
+}
