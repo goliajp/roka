@@ -12,7 +12,7 @@ All notable changes to `roka-qr` will be documented here. Format based on
   byte mode is emitted; decoder already handles all three).
 - `no_std + alloc` support.
 
-## [0.1.0] — pending
+## [0.1.0] — 2026-05-22
 
 First public-API release.
 
@@ -27,7 +27,10 @@ First public-API release.
 - `Bitmap::to_png` / `Bitmap::to_pbm` for image serialization.
 - `Error` enum (`DataTooLarge` / `InvalidImage` / `Corrupted` / `Unsupported`).
 - Internal building blocks: GF(256) arithmetic, Reed-Solomon encode/decode,
-  BCH(15,5) and BCH(18,6), DEFLATE inflate, PNG encode + decode, PBM P1/P4 I/O.
+  BCH(15,5) and BCH(18,6), full DEFLATE inflate **and deflate** (fixed
+  Huffman + LZ77), PNG encode + decode, PBM P1/P4 I/O.
+- PNG encoder with smart filter (None / Up) selection — typical QR image
+  compresses ≈33× vs the raw pixel buffer.
 - 120+ tests, including RFC vectors and end-to-end round-trip property tests.
 - Performance regression gates in `tests/perf_gate.rs` (release-mode only).
 
