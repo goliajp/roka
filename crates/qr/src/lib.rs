@@ -47,6 +47,7 @@
 mod bch;
 mod decode;
 mod deflate;
+mod deflate_encode;
 mod encode;
 mod galois;
 mod mask;

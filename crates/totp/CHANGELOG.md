@@ -14,7 +14,7 @@ All notable changes to `roka-totp` will be documented here. Format based on
   for end-to-end QR pairing.
 - `no_std + alloc` support.
 
-## [0.1.0] — pending
+## [0.1.0] — 2026-05-22
 
 First public-API release.
 

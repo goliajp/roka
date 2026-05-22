@@ -1,9 +1,9 @@
 [package]
 name = "roka-qr"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-description = "Zero-dependency QR code encoder + decoder with built-in PNG/PBM I/O. (placeholder release — see 0.1.0)"
+description = "Zero-dependency QR code encoder + decoder with built-in PNG/PBM I/O — pure Rust, no unsafe."
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/goliajp/roka"
 homepage = "https://github.com/goliajp/roka"

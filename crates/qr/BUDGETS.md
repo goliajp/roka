@@ -9,13 +9,13 @@ The point is to catch order-of-magnitude regressions, not to chase micro-perf.
 
 | Path | Budget | Best observed (M2, release) | Headroom |
 | --- | ---: | ---: | ---: |
-| `Encoder::build` (otpauth URI, EcLevel::M) | 1.0 ms | ~115 µs | ~9× |
-| `Encoder::build` (otpauth URI, EcLevel::H) | 2.5 ms | ~211 µs | ~12× |
-| `Bitmap::to_png` (V11 @ scale 8) | 1.5 ms | ~560 µs | ~3× |
-| `Bitmap::to_png` (V6 @ scale 8) | 1.5 ms | ~255 µs | ~6× |
-| `Reader::from_pbm` (V6 otpauth M) | 800 µs | ~88 µs | ~9× |
-| `Reader::from_png` (V6 otpauth M) | 1.5 ms | ~211 µs | ~7× |
-| Round-trip (URI → PNG → URI) | 3.0 ms | ~630 µs | ~5× |
+| `Encoder::build` (otpauth URI, EcLevel::M) | 1.0 ms | ~87 µs | ~11× |
+| `Encoder::build` (otpauth URI, EcLevel::H) | 1.5 ms | ~174 µs | ~9× |
+| `Bitmap::to_png` (V11 @ scale 8) | 1.0 ms | ~234 µs | ~4× |
+| `Bitmap::to_png` (V6 @ scale 8) | 600 µs | ~117 µs | ~5× |
+| `Reader::from_pbm` (V6 otpauth M) | 500 µs | ~98 µs | ~5× |
+| `Reader::from_png` (V6 otpauth M) | 1.0 ms | ~274 µs | ~4× |
+| Round-trip (URI → PNG → URI) | 2.0 ms | ~449 µs | ~4× |
 
 ## Why these matter
 
