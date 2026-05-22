@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/qr",
     "crates/totp",
+    "crates/wasm",
     # crates/app will land here when lab10-2fa reorganizes in — that's the `roka` product binary.
 ]
 

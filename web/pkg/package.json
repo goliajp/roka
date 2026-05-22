@@ -1,0 +1,25 @@
+{
+  "name": "roka-wasm",
+  "type": "module",
+  "collaborators": [
+    "GOLIA K.K."
+  ],
+  "description": "WASM bindings around roka-totp + roka-qr. Powers the Roka PWA / browser extension.",
+  "version": "0.0.1",
+  "license": "Apache-2.0 OR MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/goliajp/roka"
+  },
+  "files": [
+    "roka_wasm_bg.wasm",
+    "roka_wasm.js",
+    "roka_wasm.d.ts"
+  ],
+  "main": "roka_wasm.js",
+  "homepage": "https://github.com/goliajp/roka",
+  "types": "roka_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
