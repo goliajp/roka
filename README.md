@@ -22,14 +22,15 @@ roka/
 |-------|-----------|--------------|
 | [`roka-qr`](crates/qr/) | ✅ crates.io | Zero-dependency QR encoder + decoder with built-in PNG/PBM I/O. |
 | [`roka-totp`](crates/totp/) | ✅ crates.io | Zero-dependency TOTP / HOTP with optional QR code generation and scanning (via `roka-qr`). |
-| [`roka-wasm`](crates/wasm/) | internal (`publish = false`) | wasm-bindgen surface around the two crates above; the deployable artifact is the `.wasm` bundle in [`web/pkg/`](web/pkg/). |
+| [`roka-vault`](crates/vault/) | crates.io (planned) | Encrypted vault for TOTP secrets — self-implemented SHA-256, ChaCha20-Poly1305, PBKDF2 (≥ 600 000 iter). All primitives validated against RFC / NIST vectors + cross-checked with `pyca/cryptography`. |
+| [`roka-wasm`](crates/wasm/) | internal (`publish = false`) | wasm-bindgen surface around the three crates above; the deployable artifact is the `.wasm` bundle in [`web/pkg/`](web/pkg/). |
 | `roka` | ❌ binary | The product itself — CLI now, possibly GUI later. Uses both crates above. |
 
-## PWA (v1.0-α)
+## PWA (v1.0-β)
 
-A WASM-powered static PWA lives in [`web/`](web/). Open `web/index.html` after
-running a local HTTP server (see below). Add an account by pasting an
-`otpauth://` URI or filling the three fields; the page refreshes every second.
+A WASM-powered static PWA lives in [`web/`](web/). Encrypted vault: master
+password derives a key (PBKDF2-SHA-256, 600 000 iter), accounts encrypted at
+rest with ChaCha20-Poly1305. Live at <https://goliajp.github.io/roka/>.
 
 ```bash
 # Build the WASM bundle (one-time / on changes)
@@ -40,9 +41,13 @@ cd web && python3 -m http.server 6003
 # → open http://127.0.0.1:6003
 ```
 
-> ⚠️ **v1.0-α stores secrets in browser `localStorage` cleartext.** Vault
-> crate with master-password encryption arrives in v1.0-β. Do not use this for
-> production accounts yet.
+**Security**: `localStorage` holds only AEAD-encrypted bytes. Any tampering
+with the header (salt / iter / nonce) or ciphertext causes decryption to
+fail. Master password cannot be recovered if lost.
+
+> Self-implemented cryptography — see [`crates/vault/README.md`](crates/vault/README.md)
+> for the risk note. Algorithms pass standard test vectors but have not received
+> a formal third-party audit.
 
 ## Status
 

@@ -1,136 +1,216 @@
-// Roka PWA — TOTP UI controller.
+// Roka PWA — v1.0-β: encrypted vault.
 //
-// Loads the WASM bindings (roka-wasm), keeps an account list in localStorage,
-// and refreshes the rendered OTPs every second. Per the alpha banner in
-// index.html, secrets are stored cleartext in localStorage for v1.0-α;
-// vault-crate encryption arrives in v1.0-β.
+// localStorage now holds only AEAD-encrypted bytes (base64). The master password
+// derives a PBKDF2 key; the cached key in WasmVault encrypts/decrypts. Locking
+// the vault drops the JS reference, freeing the cached key.
 
-import init, { TotpAccount, parse_otpauth_uri } from './pkg/roka_wasm.js';
+import init, { TotpAccount, WasmVault } from './pkg/roka_wasm.js';
 
-const STORAGE_KEY = 'roka.accounts.v1';
+const STORAGE_KEY = 'roka.vault.v1';   // base64 of sealed bytes
 const STEP_SECONDS = 30;
-const RING_CIRC = 94.2477796077; // 2 * π * 15 ; keep in sync with style.css countdown-ring
+const RING_CIRC = 94.2477796077;
 
-// ───────────────────── store ─────────────────────────────────────────────
+// ───────────────────── persistence helpers ────────────────────────────
 
-/** Account schema:
- *  { id: string (uuid-ish), issuer: string, account: string, secret: string }
- */
-function loadAccounts() {
+function loadVaultBytes() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    const bin = atob(raw);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
   } catch {
-    return [];
+    return null;
   }
 }
 
-function saveAccounts(list) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+function saveVaultBytes(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  localStorage.setItem(STORAGE_KEY, btoa(bin));
 }
 
-function newId() {
-  // Crypto-grade uuid is overkill; we just need DOM-keying uniqueness.
-  return 'a' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+function randomBytes(n) {
+  const buf = new Uint8Array(n);
+  crypto.getRandomValues(buf);
+  return buf;
 }
 
-// ───────────────────── wasm engine cache ─────────────────────────────────
+// ───────────────────── state ─────────────────────────────────────────
 
-// TotpAccount instances are cheap but require the secret bytes. Cache them
-// per account ID so we don't re-decode base32 every second.
-const engines = new Map(); // id → { totp: TotpAccount, secret: string }
+/** @type {WasmVault | null} */
+let vault = null;
+let lastWindowIdx = null;
 
-function ensureEngine(account) {
-  const cached = engines.get(account.id);
-  if (cached && cached.secret === account.secret) {
-    return cached.totp;
-  }
-  // Free the old WASM-side struct if any (TotpAccount.free is provided by wasm-bindgen).
-  if (cached) cached.totp.free?.();
-  const totp = new TotpAccount(account.secret);
-  engines.set(account.id, { totp, secret: account.secret });
-  return totp;
-}
-
-function disposeEngine(id) {
-  const cached = engines.get(id);
-  if (cached) {
-    cached.totp.free?.();
-    engines.delete(id);
-  }
-}
-
-// ───────────────────── DOM refs ──────────────────────────────────────────
+// ───────────────────── DOM bootstrap ─────────────────────────────────
 
 const $ = (sel) => document.querySelector(sel);
-const accountsEl = $('#accounts');
-const emptyEl = $('#empty-state');
-const errorEl = $('#add-error');
-const uriInput = $('#uri-input');
-const issuerInput = $('#issuer-input');
-const accountInput = $('#account-input');
-const secretInput = $('#secret-input');
-const addBtn = $('#add-btn');
 
-// ───────────────────── rendering ─────────────────────────────────────────
+function show(el) { el.classList.remove('hidden'); }
+function hide(el) { el.classList.add('hidden'); }
 
-let state = []; // mirror of localStorage
+function showError(elId, msg) {
+  const el = document.getElementById(elId);
+  el.textContent = msg;
+  el.classList.add('visible');
+}
+function clearError(elId) {
+  const el = document.getElementById(elId);
+  el.textContent = '';
+  el.classList.remove('visible');
+}
+
+// ───────────────────── unlock / create flow ───────────────────────────
+
+function showUnlockScreen() {
+  const exists = loadVaultBytes() !== null;
+  $('#auth-mode').textContent = exists ? 'Unlock' : 'Create vault';
+  $('#auth-hint').textContent = exists
+    ? 'Enter your master password.'
+    : 'Choose a master password. Cannot be recovered if lost.';
+  $('#confirm-row').classList.toggle('hidden', exists);
+  show($('#auth-screen'));
+  hide($('#main-screen'));
+  $('#auth-password').focus();
+}
+
+function showMainScreen() {
+  hide($('#auth-screen'));
+  show($('#main-screen'));
+  render();
+}
+
+async function tryUnlock() {
+  clearError('auth-error');
+  const pw = $('#auth-password').value;
+  if (!pw) {
+    showError('auth-error', 'Password required.');
+    return;
+  }
+  const sealed = loadVaultBytes();
+  if (sealed) {
+    // existing vault — unlock (PBKDF2 runs here, ~200ms)
+    try {
+      vault = WasmVault.unlock(sealed, pw);
+    } catch (e) {
+      showError('auth-error', 'Wrong password.');
+      return;
+    }
+  } else {
+    // new vault — confirm password matches, create + seal
+    const confirm = $('#auth-password-confirm').value;
+    if (pw !== confirm) {
+      showError('auth-error', 'Passwords do not match.');
+      return;
+    }
+    if (pw.length < 8) {
+      showError('auth-error', 'Master password must be ≥ 8 characters.');
+      return;
+    }
+    vault = new WasmVault();
+    try {
+      const rand = randomBytes(28);
+      const sealed = vault.seal_initial(pw, rand, 0);
+      saveVaultBytes(sealed);
+    } catch (e) {
+      showError('auth-error', String(e.message || e));
+      return;
+    }
+  }
+  // clear password from DOM
+  $('#auth-password').value = '';
+  $('#auth-password-confirm').value = '';
+  showMainScreen();
+}
+
+function lockVault() {
+  // Drop the cached key (best-effort — JS GC can't guarantee zeroing).
+  vault = null;
+  // Clear any rendered codes from DOM in case they linger.
+  $('#accounts').replaceChildren();
+  showUnlockScreen();
+}
+
+// ───────────────────── add / remove ──────────────────────────────────
+
+function persist() {
+  if (!vault) return;
+  const nonce = randomBytes(12);
+  const sealed = vault.reseal(nonce);
+  saveVaultBytes(sealed);
+}
+
+function addFromForm() {
+  if (!vault) return;
+  clearError('add-error');
+  const uri = $('#uri-input').value.trim();
+  try {
+    if (uri) {
+      vault.add_from_uri(uri);
+    } else {
+      const issuer = $('#issuer-input').value.trim() || 'Untitled';
+      const account = $('#account-input').value.trim();
+      const secret = $('#secret-input').value.trim().replace(/\s+/g, '');
+      if (!secret) {
+        showError('add-error', 'Secret required.');
+        return;
+      }
+      vault.add(issuer, account, secret);
+    }
+  } catch (e) {
+    showError('add-error', String(e.message || e));
+    return;
+  }
+  persist();
+  $('#uri-input').value = '';
+  $('#issuer-input').value = '';
+  $('#account-input').value = '';
+  $('#secret-input').value = '';
+  $('#uri-input').focus();
+  render();
+}
+
+function removeAccount(index) {
+  if (!vault) return;
+  vault.remove(index);
+  persist();
+  render();
+}
+
+// ───────────────────── render ────────────────────────────────────────
 
 function render() {
-  state = loadAccounts();
-  if (state.length === 0) {
+  const accountsEl = $('#accounts');
+  const emptyEl = $('#empty-state');
+  if (!vault || vault.len() === 0) {
     emptyEl.classList.remove('hidden');
     accountsEl.replaceChildren();
     return;
   }
   emptyEl.classList.add('hidden');
 
-  // Build DOM diff against current children
-  const existing = new Map();
-  for (const li of accountsEl.children) {
-    existing.set(li.dataset.id, li);
-  }
-
-  // Build new DOM in order; reuse existing where possible
   const frag = document.createDocumentFragment();
-  for (const account of state) {
-    let li = existing.get(account.id);
-    if (!li) {
-      li = createAccountCard(account);
-    } else {
-      // Update meta if the user renamed it (future feature) — for now stable
-      existing.delete(account.id);
-    }
-    frag.appendChild(li);
-  }
-  // Anything left in `existing` was removed
-  for (const [id, li] of existing) {
-    li.remove();
-    disposeEngine(id);
+  for (let i = 0; i < vault.len(); i++) {
+    frag.appendChild(createCard(i));
   }
   accountsEl.replaceChildren(frag);
-
   updateAllCodes();
 }
 
-function createAccountCard(account) {
+function createCard(index) {
   const li = document.createElement('li');
   li.className = 'account-card';
-  li.dataset.id = account.id;
+  li.dataset.idx = index;
 
   const meta = document.createElement('div');
   meta.className = 'account-card__meta';
-
   const issuer = document.createElement('div');
   issuer.className = 'account-card__issuer';
-  issuer.textContent = account.issuer || '—';
-
+  issuer.textContent = vault.issuer(index) || '—';
   const acct = document.createElement('div');
   acct.className = 'account-card__account';
-  acct.textContent = account.account || '';
-
+  acct.textContent = vault.account_label(index);
   meta.appendChild(issuer);
   meta.appendChild(acct);
 
@@ -140,7 +220,7 @@ function createAccountCard(account) {
   code.dataset.role = 'code';
   code.title = 'Copy code';
   code.textContent = '······';
-  code.addEventListener('click', () => copyCode(account.id));
+  code.addEventListener('click', () => copyCode(index));
 
   const countdown = document.createElement('div');
   countdown.className = 'account-card__countdown';
@@ -155,9 +235,11 @@ function createAccountCard(account) {
   const remove = document.createElement('button');
   remove.type = 'button';
   remove.className = 'account-card__remove';
-  remove.setAttribute('aria-label', `Remove ${account.issuer || 'account'}`);
+  remove.setAttribute('aria-label', 'Remove account');
   remove.textContent = '×';
-  remove.addEventListener('click', () => removeAccount(account.id));
+  remove.addEventListener('click', () => {
+    if (confirm(`Remove ${vault.issuer(index) || 'account'}?`)) removeAccount(index);
+  });
 
   li.appendChild(meta);
   li.appendChild(code);
@@ -166,11 +248,9 @@ function createAccountCard(account) {
   return li;
 }
 
-// ───────────────────── live update loop ──────────────────────────────────
-
-let lastWindowIdx = null;
-
 function updateAllCodes() {
+  if (!vault) return;
+  const accountsEl = $('#accounts');
   const nowSec = Math.floor(Date.now() / 1000);
   const winIdx = Math.floor(nowSec / STEP_SECONDS);
   const remaining = STEP_SECONDS - (nowSec % STEP_SECONDS);
@@ -178,48 +258,33 @@ function updateAllCodes() {
   lastWindowIdx = winIdx;
 
   for (const li of accountsEl.children) {
-    const id = li.dataset.id;
-    const account = state.find((a) => a.id === id);
-    if (!account) continue;
-
+    const idx = parseInt(li.dataset.idx, 10);
     let codeStr;
     try {
-      const engine = ensureEngine(account);
-      codeStr = engine.otp_at(BigInt(nowSec));
+      codeStr = vault.otp_at(idx, BigInt(nowSec));
     } catch (e) {
-      console.error('otp_at failed', e);
       codeStr = '------';
     }
-
     const codeEl = li.querySelector('[data-role="code"]');
     const labelEl = li.querySelector('[data-role="countdown"]');
     const ringFill = li.querySelector('.countdown-ring__fill');
 
-    // Format "123 456" with a thin gap (en-space) for readability
     const formatted = codeStr.length === 6
       ? `${codeStr.slice(0, 3)} ${codeStr.slice(3)}`
       : codeStr;
-
     if (codeEl.textContent !== formatted) {
       codeEl.textContent = formatted;
       if (windowChanged) {
-        // re-trigger the flip animation
         codeEl.classList.remove('fresh');
-        // force reflow so the animation restarts
         void codeEl.offsetWidth;
         codeEl.classList.add('fresh');
         setTimeout(() => codeEl.classList.remove('fresh'), 520);
       }
     }
-
     labelEl.textContent = remaining;
-
-    // Stroke offset: filled portion shrinks as time runs out.
-    // dashoffset = circumference * (1 - remaining/STEP_SECONDS)
     const offset = RING_CIRC * (1 - remaining / STEP_SECONDS);
     ringFill.style.strokeDashoffset = offset.toFixed(3);
 
-    // Warning state at < 5s
     if (remaining < 5) {
       li.classList.add('warning');
       codeEl.classList.add('warning');
@@ -230,17 +295,15 @@ function updateAllCodes() {
   }
 }
 
-// ───────────────────── actions ───────────────────────────────────────────
-
-async function copyCode(id) {
-  const li = accountsEl.querySelector(`[data-id="${id}"]`);
+async function copyCode(index) {
+  if (!vault) return;
+  const li = $('#accounts').querySelector(`[data-idx="${index}"]`);
   if (!li) return;
   const codeEl = li.querySelector('[data-role="code"]');
   const raw = (codeEl.textContent || '').replace(/\s+/g, '');
   try {
     await navigator.clipboard.writeText(raw);
-  } catch (e) {
-    // Fall back to a textarea-based copy
+  } catch {
     const ta = document.createElement('textarea');
     ta.value = raw;
     ta.style.position = 'fixed';
@@ -256,107 +319,41 @@ async function copyCode(id) {
   setTimeout(() => codeEl.classList.remove('copied'), 600);
 }
 
-function removeAccount(id) {
-  const idx = state.findIndex((a) => a.id === id);
-  if (idx === -1) return;
-  state.splice(idx, 1);
-  saveAccounts(state);
-  disposeEngine(id);
-  render();
-}
-
-function showError(msg) {
-  errorEl.textContent = msg;
-  errorEl.classList.add('visible');
-}
-function clearError() {
-  errorEl.textContent = '';
-  errorEl.classList.remove('visible');
-}
-
-function addFromForm() {
-  clearError();
-  const uri = uriInput.value.trim();
-  let issuer, account, secret;
-  if (uri) {
-    try {
-      const parsed = parse_otpauth_uri(uri);
-      issuer = parsed.issuer;
-      account = parsed.account;
-      secret = parsed.secret_base32;
-    } catch (e) {
-      showError(String(e.message || e));
-      return;
-    }
-  } else {
-    issuer = issuerInput.value.trim();
-    account = accountInput.value.trim();
-    secret = secretInput.value.trim().replace(/\s+/g, '');
-    if (!secret) {
-      showError('Secret required.');
-      return;
-    }
-  }
-
-  // Validate by trying to construct a TotpAccount — surface base32 errors here
-  let totp;
-  try {
-    totp = new TotpAccount(secret);
-  } catch (e) {
-    showError(String(e.message || e));
-    return;
-  }
-  totp.free?.(); // we'll re-create via ensureEngine on render
-
-  const id = newId();
-  state.push({ id, issuer: issuer || 'Untitled', account, secret });
-  saveAccounts(state);
-
-  // Clear form
-  uriInput.value = '';
-  issuerInput.value = '';
-  accountInput.value = '';
-  secretInput.value = '';
-  uriInput.focus();
-
-  render();
-}
-
-addBtn.addEventListener('click', addFromForm);
-
-// Submit on Enter for any of the inputs
-for (const el of [uriInput, issuerInput, accountInput, secretInput]) {
-  el.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      addFromForm();
-    }
-  });
-}
-
-// ───────────────────── boot ──────────────────────────────────────────────
+// ───────────────────── boot ──────────────────────────────────────────
 
 (async function boot() {
   try {
     await init();
   } catch (e) {
-    console.error('Failed to load roka-wasm', e);
-    showError('Failed to load WASM module: ' + String(e));
+    document.body.innerHTML = `<pre style="color:#d94340;padding:2rem">Failed to load WASM: ${e}</pre>`;
     return;
   }
-  render();
-  // First tick immediate, then align to second boundary
-  updateAllCodes();
-  const msToNextSecond = 1000 - (Date.now() % 1000);
-  setTimeout(() => {
-    updateAllCodes();
-    setInterval(updateAllCodes, 1000);
-  }, msToNextSecond);
-
-  // Register the service worker (offline / installability)
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker
-      .register('./service-worker.js')
-      .catch((e) => console.warn('SW registration failed', e));
+  // Wire DOM
+  $('#auth-submit').addEventListener('click', tryUnlock);
+  $('#auth-password').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); tryUnlock(); }
+  });
+  $('#auth-password-confirm').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); tryUnlock(); }
+  });
+  $('#lock-btn').addEventListener('click', lockVault);
+  $('#add-btn').addEventListener('click', addFromForm);
+  for (const el of ['#uri-input', '#issuer-input', '#account-input', '#secret-input']) {
+    $(el).addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); addFromForm(); }
+    });
   }
+
+  showUnlockScreen();
+
+  // Live update loop
+  const tick = () => updateAllCodes();
+  const msToNext = 1000 - (Date.now() % 1000);
+  setTimeout(() => { tick(); setInterval(tick, 1000); }, msToNext);
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./service-worker.js').catch(() => {});
+  }
+  // suppress unused import warning
+  void TotpAccount;
 })();

@@ -137,6 +137,209 @@ export class TotpAccount {
 if (Symbol.dispose) TotpAccount.prototype[Symbol.dispose] = TotpAccount.prototype.free;
 
 /**
+ * PWA-side handle for an encrypted vault.
+ *
+ * JS lifecycle:
+ * 1. **First-run**: `new WasmVault()` → user picks master password →
+ *    `seal_initial(password, random_28b, 0)` → store bytes in localStorage.
+ * 2. **Unlock**: `WasmVault.unlock(sealed_bytes, password)` derives & **caches** the
+ *    master key, decrypts accounts. PBKDF2 runs once here (≈ 200 ms).
+ * 3. **Modify**: `add`/`add_from_uri`/`remove` → `reseal(nonce_12b)` (no PBKDF2,
+ *    a few ms). Caller provides 12 fresh random bytes per reseal.
+ * 4. **Lock**: drop the WasmVault → cached key gone from memory.
+ */
+export class WasmVault {
+    static __wrap(ptr) {
+        const obj = Object.create(WasmVault.prototype);
+        obj.__wbg_ptr = ptr;
+        WasmVaultFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        WasmVaultFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_wasmvault_free(ptr, 0);
+    }
+    /**
+     * Account label for account at `index`. Empty string if out of bounds.
+     * @param {number} index
+     * @returns {string}
+     */
+    account_label(index) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.wasmvault_account_label(this.__wbg_ptr, index);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Add an account from explicit fields (`secret_base32` is decoded).
+     * @param {string} issuer
+     * @param {string} account
+     * @param {string} secret_base32
+     */
+    add(issuer, account, secret_base32) {
+        const ptr0 = passStringToWasm0(issuer, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(account, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(secret_base32, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmvault_add(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Add an account from an `otpauth://` URI.
+     * @param {string} uri
+     */
+    add_from_uri(uri) {
+        const ptr0 = passStringToWasm0(uri, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmvault_add_from_uri(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Issuer for account at `index`. Empty string if out of bounds.
+     * @param {number} index
+     * @returns {string}
+     */
+    issuer(index) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.wasmvault_issuer(this.__wbg_ptr, index);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Number of accounts.
+     * @returns {number}
+     */
+    len() {
+        const ret = wasm.wasmvault_len(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Create an empty unlocked vault in memory (no salt/key yet — `seal_initial` sets them).
+     */
+    constructor() {
+        const ret = wasm.wasmvault_new();
+        this.__wbg_ptr = ret;
+        WasmVaultFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * OTP at `unix_seconds` for account `index`.
+     * @param {number} index
+     * @param {bigint} unix_seconds
+     * @returns {string}
+     */
+    otp_at(index, unix_seconds) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.wasmvault_otp_at(this.__wbg_ptr, index, unix_seconds);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * Remove account by index. Returns `false` if out of bounds.
+     * @param {number} index
+     * @returns {boolean}
+     */
+    remove(index) {
+        const ret = wasm.wasmvault_remove(this.__wbg_ptr, index);
+        return ret !== 0;
+    }
+    /**
+     * Re-seal an already-unlocked vault using the cached key. `nonce_12b` must be
+     * 12 fresh random bytes. **Will fail** if vault is locked.
+     * @param {Uint8Array} nonce_12b
+     * @returns {Uint8Array}
+     */
+    reseal(nonce_12b) {
+        const ptr0 = passArray8ToWasm0(nonce_12b, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmvault_reseal(this.__wbg_ptr, ptr0, len0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
+    }
+    /**
+     * First-time seal: derives a fresh key from `password` + the salt in `random_28b[..16]`,
+     * then seals using `random_28b[16..28]` as nonce. Caches the key for `reseal`.
+     * `iterations = 0` means use the library default (600 000).
+     * @param {string} password
+     * @param {Uint8Array} random_28b
+     * @param {number} iterations
+     * @returns {Uint8Array}
+     */
+    seal_initial(password, random_28b, iterations) {
+        const ptr0 = passStringToWasm0(password, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(random_28b, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmvault_seal_initial(this.__wbg_ptr, ptr0, len0, ptr1, len1, iterations);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
+    }
+    /**
+     * Unlock an existing sealed vault. PBKDF2 runs here (~200 ms on M2).
+     * Caches the derived key for cheap subsequent `reseal()`.
+     * @param {Uint8Array} sealed
+     * @param {string} password
+     * @returns {WasmVault}
+     */
+    static unlock(sealed, password) {
+        const ptr0 = passArray8ToWasm0(sealed, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(password, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmvault_unlock(ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return WasmVault.__wrap(ret[0]);
+    }
+}
+if (Symbol.dispose) WasmVault.prototype[Symbol.dispose] = WasmVault.prototype.free;
+
+/**
  * Parse an `otpauth://totp/...` URI into the fields the PWA needs.
  *
  * Accepts the standard layout `otpauth://totp/{label}?secret=...&issuer=...`.
@@ -187,6 +390,14 @@ const OtpauthFieldsFinalization = (typeof FinalizationRegistry === 'undefined')
 const TotpAccountFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_totpaccount_free(ptr, 1));
+const WasmVaultFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_wasmvault_free(ptr, 1));
+
+function getArrayU8FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
+}
 
 function getStringFromWasm0(ptr, len) {
     return decodeText(ptr >>> 0, len);
@@ -198,6 +409,13 @@ function getUint8ArrayMemory0() {
         cachedUint8ArrayMemory0 = new Uint8Array(wasm.memory.buffer);
     }
     return cachedUint8ArrayMemory0;
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
 }
 
 function passStringToWasm0(arg, malloc, realloc) {

@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#0f0f12">
-<meta name="description" content="Roka — zero-dependency TOTP authenticator in your browser. Audit-friendly Rust + WASM.">
+<meta name="theme-color" content="#0c0e11">
+<meta name="description" content="Roka — zero-dependency TOTP authenticator with master-password vault. Audit-friendly Rust + WASM.">
 <title>Roka · TOTP</title>
 <link rel="manifest" href="./manifest.json">
 <link rel="icon" type="image/svg+xml" href="./icon.svg">
@@ -15,39 +15,70 @@
 <header class="topbar">
   <h1><span class="brand">Roka</span></h1>
   <div class="alpha-banner" role="alert">
-    <strong>v1.0-α</strong> — secrets stored in browser <code>localStorage</code> (cleartext).
+    <strong>v1.0-β</strong> — secrets encrypted at rest with master password
+    (ChaCha20-Poly1305 + PBKDF2-SHA-256).
     <a href="https://github.com/goliajp/roka" target="_blank" rel="noopener">Source</a>
   </div>
 </header>
 
 <main>
-  <section id="empty-state" class="empty hidden" aria-live="polite">
-    <h2>No accounts yet</h2>
-    <p>Add a TOTP secret to begin. Paste an <code>otpauth://</code> URI or fill the form below.</p>
-  </section>
 
-  <ul id="accounts" class="accounts"></ul>
-
-  <section class="add-form" aria-labelledby="add-heading">
-    <h2 id="add-heading">Add account</h2>
-    <p class="hint">Paste an <code>otpauth://totp/...</code> URI, or fill the three fields manually.</p>
-    <label for="uri-input">otpauth URI</label>
-    <input id="uri-input" type="text" placeholder="otpauth://totp/Acme:alice@example.com?secret=JBSWY..." autocomplete="off">
-    <div class="separator"><span>or</span></div>
-    <div class="row">
-      <label for="issuer-input">Issuer
-        <input id="issuer-input" type="text" placeholder="Acme" autocomplete="off">
-      </label>
-      <label for="account-input">Account
-        <input id="account-input" type="text" placeholder="alice@example.com" autocomplete="off">
+  <!-- ───── unlock / create screen ───── -->
+  <section id="auth-screen" class="auth-screen" aria-labelledby="auth-mode">
+    <h2 id="auth-mode">Unlock</h2>
+    <p class="hint" id="auth-hint">Enter your master password.</p>
+    <label for="auth-password">Master password
+      <input id="auth-password" type="password" autocomplete="current-password" spellcheck="false">
+    </label>
+    <div id="confirm-row" class="hidden">
+      <label for="auth-password-confirm">Confirm password
+        <input id="auth-password-confirm" type="password" autocomplete="new-password" spellcheck="false">
       </label>
     </div>
-    <label for="secret-input">Secret (base32)
-      <input id="secret-input" type="text" placeholder="JBSWY3DPEHPK3PXP" autocomplete="off" spellcheck="false">
-    </label>
-    <button id="add-btn" type="button">Add</button>
-    <div id="add-error" class="error" role="alert"></div>
+    <button id="auth-submit" type="button">Unlock</button>
+    <div id="auth-error" class="error" role="alert"></div>
+    <p class="hint subtle">
+      The master password derives a key (PBKDF2-SHA-256, 600 000 iterations) that
+      decrypts your account list in this browser. We cannot recover it for you.
+    </p>
   </section>
+
+  <!-- ───── main screen (visible after unlock) ───── -->
+  <section id="main-screen" class="hidden">
+
+    <div class="action-row">
+      <button id="lock-btn" type="button" class="ghost-btn" title="Lock vault">🔒 Lock</button>
+    </div>
+
+    <section id="empty-state" class="empty hidden" aria-live="polite">
+      <h2>No accounts yet</h2>
+      <p>Add a TOTP secret to begin. Paste an <code>otpauth://</code> URI or fill the form below.</p>
+    </section>
+
+    <ul id="accounts" class="accounts"></ul>
+
+    <section class="add-form" aria-labelledby="add-heading">
+      <h2 id="add-heading">Add account</h2>
+      <p class="hint">Paste an <code>otpauth://totp/...</code> URI, or fill the three fields manually.</p>
+      <label for="uri-input">otpauth URI</label>
+      <input id="uri-input" type="text" placeholder="otpauth://totp/Acme:alice@example.com?secret=JBSWY..." autocomplete="off">
+      <div class="separator"><span>or</span></div>
+      <div class="row">
+        <label for="issuer-input">Issuer
+          <input id="issuer-input" type="text" placeholder="Acme" autocomplete="off">
+        </label>
+        <label for="account-input">Account
+          <input id="account-input" type="text" placeholder="alice@example.com" autocomplete="off">
+        </label>
+      </div>
+      <label for="secret-input">Secret (base32)
+        <input id="secret-input" type="text" placeholder="JBSWY3DPEHPK3PXP" autocomplete="off" spellcheck="false">
+      </label>
+      <button id="add-btn" type="button">Add</button>
+      <div id="add-error" class="error" role="alert"></div>
+    </section>
+  </section>
+
 </main>
 
 <footer>

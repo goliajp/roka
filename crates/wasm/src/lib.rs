@@ -8,6 +8,7 @@
 use wasm_bindgen::prelude::*;
 
 use roka_totp::{Secret, Totp};
+use roka_vault::{Account, Vault};
 
 /// One TOTP account: secret + display metadata.
 ///
@@ -128,4 +129,135 @@ fn url_decode(s: &str) -> Option<String> {
         }
     }
     Some(out)
+}
+
+// ───────────────────────────── Vault wrapper ─────────────────────────────
+
+/// PWA-side handle for an encrypted vault.
+///
+/// JS lifecycle:
+/// 1. **First-run**: `new WasmVault()` → user picks master password →
+///    `seal_initial(password, random_28b, 0)` → store bytes in localStorage.
+/// 2. **Unlock**: `WasmVault.unlock(sealed_bytes, password)` derives & **caches** the
+///    master key, decrypts accounts. PBKDF2 runs once here (≈ 200 ms).
+/// 3. **Modify**: `add`/`add_from_uri`/`remove` → `reseal(nonce_12b)` (no PBKDF2,
+///    a few ms). Caller provides 12 fresh random bytes per reseal.
+/// 4. **Lock**: drop the WasmVault → cached key gone from memory.
+#[wasm_bindgen]
+pub struct WasmVault {
+    inner: Vault,
+    key: Option<[u8; 32]>,
+    salt: Option<[u8; 16]>,
+    iter: u32,
+}
+
+#[wasm_bindgen]
+impl WasmVault {
+    /// Create an empty unlocked vault in memory (no salt/key yet — `seal_initial` sets them).
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> WasmVault {
+        Self {
+            inner: Vault::new(),
+            key: None,
+            salt: None,
+            iter: 0,
+        }
+    }
+
+    /// Unlock an existing sealed vault. PBKDF2 runs here (~200 ms on M2).
+    /// Caches the derived key for cheap subsequent `reseal()`.
+    pub fn unlock(sealed: &[u8], password: &str) -> Result<WasmVault, JsError> {
+        let (salt, iter) = Vault::read_header(sealed).map_err(|e| JsError::new(&e.to_string()))?;
+        let key = Vault::derive_key(password.as_bytes(), &salt, iter);
+        let inner = Vault::open_with_key(sealed, &key).map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(WasmVault {
+            inner,
+            key: Some(key),
+            salt: Some(salt),
+            iter,
+        })
+    }
+
+    /// First-time seal: derives a fresh key from `password` + the salt in `random_28b[..16]`,
+    /// then seals using `random_28b[16..28]` as nonce. Caches the key for `reseal`.
+    /// `iterations = 0` means use the library default (600 000).
+    pub fn seal_initial(
+        &mut self,
+        password: &str,
+        random_28b: &[u8],
+        iterations: u32,
+    ) -> Result<Vec<u8>, JsError> {
+        if random_28b.len() != 28 {
+            return Err(JsError::new("random_28b must be exactly 28 bytes"));
+        }
+        let mut rand = [0u8; 28];
+        rand.copy_from_slice(random_28b);
+        let iter = if iterations == 0 { roka_vault::DEFAULT_ITERATIONS } else { iterations };
+        let bytes = self.inner.seal_with(password.as_bytes(), &rand, iter);
+        let salt: [u8; 16] = rand[..16].try_into().unwrap();
+        let key = Vault::derive_key(password.as_bytes(), &salt, iter);
+        self.key = Some(key);
+        self.salt = Some(salt);
+        self.iter = iter;
+        Ok(bytes)
+    }
+
+    /// Re-seal an already-unlocked vault using the cached key. `nonce_12b` must be
+    /// 12 fresh random bytes. **Will fail** if vault is locked.
+    pub fn reseal(&self, nonce_12b: &[u8]) -> Result<Vec<u8>, JsError> {
+        let key = self.key.as_ref().ok_or_else(|| JsError::new("vault is locked"))?;
+        let salt = self.salt.as_ref().ok_or_else(|| JsError::new("vault is locked"))?;
+        if nonce_12b.len() != 12 {
+            return Err(JsError::new("nonce_12b must be exactly 12 bytes"));
+        }
+        let mut nonce = [0u8; 12];
+        nonce.copy_from_slice(nonce_12b);
+        Ok(self.inner.seal_with_key(key, salt, self.iter, &nonce))
+    }
+
+    /// Number of accounts.
+    pub fn len(&self) -> usize {
+        self.inner.accounts().len()
+    }
+
+    /// Issuer for account at `index`. Empty string if out of bounds.
+    pub fn issuer(&self, index: usize) -> String {
+        self.inner.accounts().get(index).map(|a| a.issuer.clone()).unwrap_or_default()
+    }
+
+    /// Account label for account at `index`. Empty string if out of bounds.
+    pub fn account_label(&self, index: usize) -> String {
+        self.inner.accounts().get(index).map(|a| a.account.clone()).unwrap_or_default()
+    }
+
+    /// OTP at `unix_seconds` for account `index`.
+    pub fn otp_at(&self, index: usize, unix_seconds: u64) -> Result<String, JsError> {
+        let a = self.inner.accounts().get(index).ok_or_else(|| JsError::new("index out of bounds"))?;
+        let totp = Totp::builder(Secret::from_bytes(a.secret.clone())).build();
+        Ok(totp.code_at(unix_seconds))
+    }
+
+    /// Add an account from explicit fields (`secret_base32` is decoded).
+    pub fn add(&mut self, issuer: &str, account: &str, secret_base32: &str) -> Result<(), JsError> {
+        let secret = Secret::from_base32(secret_base32)
+            .map_err(|e| JsError::new(&format!("invalid base32 secret: {e}")))?;
+        self.inner.add(Account {
+            issuer: issuer.to_string(),
+            account: account.to_string(),
+            secret: secret.as_bytes().to_vec(),
+        });
+        Ok(())
+    }
+
+    /// Add an account from an `otpauth://` URI.
+    pub fn add_from_uri(&mut self, uri: &str) -> Result<(), JsError> {
+        let a = Account::from_otpauth_uri(uri).map_err(|e| JsError::new(&e.to_string()))?;
+        self.inner.add(a);
+        Ok(())
+    }
+
+    /// Remove account by index. Returns `false` if out of bounds.
+    pub fn remove(&mut self, index: usize) -> bool {
+        self.inner.remove(index)
+    }
 }

@@ -229,6 +229,118 @@ main {
   gap: var(--space-5);
 }
 
+/* ── auth screen (unlock + create vault) ──────────────────────────────────── */
+.auth-screen {
+  background: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-elevated-2) 100%);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  position: relative;
+}
+.auth-screen::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--vermilion) 0%, var(--vermilion) 30%, var(--amber) 30%, var(--amber) 60%, transparent 60%);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+.auth-screen h2 {
+  margin: var(--space-2) 0 0;
+  font-family: 'Big Shoulders Display', sans-serif;
+  font-weight: 700;
+  font-size: 1.3rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+.auth-screen .hint {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+}
+.auth-screen .hint.subtle {
+  margin-top: var(--space-4);
+  color: var(--text-tertiary);
+  font-size: 0.78rem;
+  line-height: 1.6;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-4);
+}
+.auth-screen label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.74rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.auth-screen input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.92rem;
+  color: var(--text-primary);
+  transition: border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
+}
+.auth-screen input:focus {
+  outline: none;
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px rgba(255, 181, 58, 0.12);
+}
+#auth-submit {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  font-family: 'Big Shoulders Display', sans-serif;
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--bg-base);
+  background: var(--amber);
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+#auth-submit:hover {
+  background: #ffc966;
+}
+#auth-submit:active {
+  transform: translateY(1px);
+}
+.hidden { display: none !important; }
+
+/* ── action row (lock button) ─────────────────────────────────────────────── */
+.action-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: calc(-1 * var(--space-2));
+}
+.ghost-btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  letter-spacing: 0.04em;
+  transition: color var(--dur-fast), border-color var(--dur-fast);
+}
+.ghost-btn:hover {
+  color: var(--vermilion);
+  border-color: var(--vermilion);
+}
+
 /* ── empty state — like an unrented locker ───────────────────────────────── */
 .empty {
   border: 1.5px dashed var(--border-strong);

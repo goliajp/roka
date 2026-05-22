@@ -3,6 +3,7 @@
 export const memory: WebAssembly.Memory;
 export const __wbg_otpauthfields_free: (a: number, b: number) => void;
 export const __wbg_totpaccount_free: (a: number, b: number) => void;
+export const __wbg_wasmvault_free: (a: number, b: number) => void;
 export const otpauthfields_account: (a: number) => [number, number];
 export const otpauthfields_issuer: (a: number) => [number, number];
 export const otpauthfields_secret_base32: (a: number) => [number, number];
@@ -10,6 +11,17 @@ export const parse_otpauth_uri: (a: number, b: number) => [number, number, numbe
 export const totpaccount_new: (a: number, b: number) => [number, number, number];
 export const totpaccount_otp_at: (a: number, b: bigint) => [number, number];
 export const totpaccount_seconds_remaining_at: (a: number, b: bigint) => number;
+export const wasmvault_account_label: (a: number, b: number) => [number, number];
+export const wasmvault_add: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
+export const wasmvault_add_from_uri: (a: number, b: number, c: number) => [number, number];
+export const wasmvault_issuer: (a: number, b: number) => [number, number];
+export const wasmvault_len: (a: number) => number;
+export const wasmvault_new: () => number;
+export const wasmvault_otp_at: (a: number, b: number, c: bigint) => [number, number, number, number];
+export const wasmvault_remove: (a: number, b: number) => number;
+export const wasmvault_reseal: (a: number, b: number, c: number) => [number, number, number, number];
+export const wasmvault_seal_initial: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+export const wasmvault_unlock: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const __wbindgen_externrefs: WebAssembly.Table;
 export const __wbindgen_free: (a: number, b: number, c: number) => void;
 export const __wbindgen_malloc: (a: number, b: number) => number;
