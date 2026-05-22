@@ -50,6 +50,71 @@ export class TotpAccount {
 }
 
 /**
+ * PWA-side handle for an encrypted vault.
+ *
+ * JS lifecycle:
+ * 1. **First-run**: `new WasmVault()` → user picks master password →
+ *    `seal_initial(password, random_28b, 0)` → store bytes in localStorage.
+ * 2. **Unlock**: `WasmVault.unlock(sealed_bytes, password)` derives & **caches** the
+ *    master key, decrypts accounts. PBKDF2 runs once here (≈ 200 ms).
+ * 3. **Modify**: `add`/`add_from_uri`/`remove` → `reseal(nonce_12b)` (no PBKDF2,
+ *    a few ms). Caller provides 12 fresh random bytes per reseal.
+ * 4. **Lock**: drop the WasmVault → cached key gone from memory.
+ */
+export class WasmVault {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Account label for account at `index`. Empty string if out of bounds.
+     */
+    account_label(index: number): string;
+    /**
+     * Add an account from explicit fields (`secret_base32` is decoded).
+     */
+    add(issuer: string, account: string, secret_base32: string): void;
+    /**
+     * Add an account from an `otpauth://` URI.
+     */
+    add_from_uri(uri: string): void;
+    /**
+     * Issuer for account at `index`. Empty string if out of bounds.
+     */
+    issuer(index: number): string;
+    /**
+     * Number of accounts.
+     */
+    len(): number;
+    /**
+     * Create an empty unlocked vault in memory (no salt/key yet — `seal_initial` sets them).
+     */
+    constructor();
+    /**
+     * OTP at `unix_seconds` for account `index`.
+     */
+    otp_at(index: number, unix_seconds: bigint): string;
+    /**
+     * Remove account by index. Returns `false` if out of bounds.
+     */
+    remove(index: number): boolean;
+    /**
+     * Re-seal an already-unlocked vault using the cached key. `nonce_12b` must be
+     * 12 fresh random bytes. **Will fail** if vault is locked.
+     */
+    reseal(nonce_12b: Uint8Array): Uint8Array;
+    /**
+     * First-time seal: derives a fresh key from `password` + the salt in `random_28b[..16]`,
+     * then seals using `random_28b[16..28]` as nonce. Caches the key for `reseal`.
+     * `iterations = 0` means use the library default (600 000).
+     */
+    seal_initial(password: string, random_28b: Uint8Array, iterations: number): Uint8Array;
+    /**
+     * Unlock an existing sealed vault. PBKDF2 runs here (~200 ms on M2).
+     * Caches the derived key for cheap subsequent `reseal()`.
+     */
+    static unlock(sealed: Uint8Array, password: string): WasmVault;
+}
+
+/**
  * Parse an `otpauth://totp/...` URI into the fields the PWA needs.
  *
  * Accepts the standard layout `otpauth://totp/{label}?secret=...&issuer=...`.
@@ -65,6 +130,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_otpauthfields_free: (a: number, b: number) => void;
     readonly __wbg_totpaccount_free: (a: number, b: number) => void;
+    readonly __wbg_wasmvault_free: (a: number, b: number) => void;
     readonly otpauthfields_account: (a: number) => [number, number];
     readonly otpauthfields_issuer: (a: number) => [number, number];
     readonly otpauthfields_secret_base32: (a: number) => [number, number];
@@ -72,6 +138,17 @@ export interface InitOutput {
     readonly totpaccount_new: (a: number, b: number) => [number, number, number];
     readonly totpaccount_otp_at: (a: number, b: bigint) => [number, number];
     readonly totpaccount_seconds_remaining_at: (a: number, b: bigint) => number;
+    readonly wasmvault_account_label: (a: number, b: number) => [number, number];
+    readonly wasmvault_add: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
+    readonly wasmvault_add_from_uri: (a: number, b: number, c: number) => [number, number];
+    readonly wasmvault_issuer: (a: number, b: number) => [number, number];
+    readonly wasmvault_len: (a: number) => number;
+    readonly wasmvault_new: () => number;
+    readonly wasmvault_otp_at: (a: number, b: number, c: bigint) => [number, number, number, number];
+    readonly wasmvault_remove: (a: number, b: number) => number;
+    readonly wasmvault_reseal: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly wasmvault_seal_initial: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly wasmvault_unlock: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
