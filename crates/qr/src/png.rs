@@ -30,41 +30,72 @@ use crate::pbm::Bitmap;
 const PNG_SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
 /// 把 Bitmap 编码为 PNG（8-bit 灰度，0=黑 255=白；行首 filter byte 用 0=None）。
+///
+/// 优化要点：
+///   1. 整个 PNG 输出 Vec 一次性预分配（避免 push 时多次 realloc）
+///   2. CRC32 用 256 项查表，每字节 1 次异或代替 8 轮位运算
+///   3. Adler-32 用"deferred mod"——每 5552 字节才取一次余
+///   4. 像素行用 `extend_from_slice` 写入预先组装的 buffer（每行一次内存拷贝）
 pub fn encode_grayscale(bitmap: &Bitmap) -> Vec<u8> {
     let w = bitmap.width as u32;
     let h = bitmap.height as u32;
+    let row_bytes = bitmap.width + 1;
+    let raw_len = row_bytes * bitmap.height;
+    let n_blocks = raw_len.div_ceil(65535).max(1);
 
-    // 构造未压缩"图像数据"：每行 = filter byte (0) + width 个 灰度像素。
-    let mut raw = Vec::with_capacity((bitmap.width + 1) * bitmap.height);
-    for y in 0..bitmap.height {
-        raw.push(0u8); // filter type None
-        for x in 0..bitmap.width {
-            // PBM 约定 true = 黑，PNG 灰度约定 0 = 黑、255 = 白。
-            raw.push(if bitmap.get(x, y) { 0 } else { 255 });
-        }
-    }
-
-    // zlib 包装 DEFLATE stored blocks。
-    let compressed = zlib_wrap(&raw);
-
-    let mut out = Vec::new();
+    // 一次性算总长上界
+    let zlib_size = 2 + 5 * n_blocks + raw_len + 4;
+    let total = 8 + 25 + 12 + zlib_size + 12;
+    let mut out = Vec::with_capacity(total);
     out.extend_from_slice(&PNG_SIGNATURE);
 
     // IHDR
-    let mut ihdr = Vec::with_capacity(13);
-    ihdr.extend_from_slice(&w.to_be_bytes());
-    ihdr.extend_from_slice(&h.to_be_bytes());
-    ihdr.push(8); // bit depth
-    ihdr.push(0); // color type = grayscale
-    ihdr.push(0); // compression = deflate
-    ihdr.push(0); // filter method = adaptive
-    ihdr.push(0); // interlace = none
+    let mut ihdr = [0u8; 13];
+    ihdr[0..4].copy_from_slice(&w.to_be_bytes());
+    ihdr[4..8].copy_from_slice(&h.to_be_bytes());
+    ihdr[8] = 8; // bit depth = 8
     write_chunk(&mut out, b"IHDR", &ihdr);
 
-    // IDAT
-    write_chunk(&mut out, b"IDAT", &compressed);
+    // IDAT 直接写入 out
+    let idat_len_pos = out.len();
+    out.extend_from_slice(&[0u8; 4]);
+    let idat_start = out.len();
+    out.extend_from_slice(b"IDAT");
+    let idat_body_start = out.len();
+    out.push(0x78); // CMF
+    out.push(0x01); // FLG
 
-    // IEND
+    // 预组装"raw"扁平 buffer：每行 = filter(0) + pixel 字节。
+    // 每个像素一次 push；编译器应能对 bool→u8 映射做向量化。
+    let mut raw = Vec::with_capacity(raw_len);
+    for y in 0..bitmap.height {
+        raw.push(0u8); // filter None
+        let row_slice = &bitmap.pixels[y * bitmap.width..(y + 1) * bitmap.width];
+        raw.extend(row_slice.iter().map(|&px| if px { 0u8 } else { 255 }));
+    }
+    debug_assert_eq!(raw.len(), raw_len);
+
+    // 写 stored 块（每块最多 65535 字节）
+    let mut i = 0usize;
+    while i < raw.len() {
+        let this_block = (raw.len() - i).min(65535);
+        let bfinal = i + this_block == raw.len();
+        out.push(if bfinal { 0x01 } else { 0x00 });
+        out.extend_from_slice(&(this_block as u16).to_le_bytes());
+        out.extend_from_slice(&(!(this_block as u16)).to_le_bytes());
+        out.extend_from_slice(&raw[i..i + this_block]);
+        i += this_block;
+    }
+
+    // Adler-32 over raw（deferred mod 每 5552 字节）
+    out.extend_from_slice(&adler32(&raw).to_be_bytes());
+
+    // patch IDAT length + CRC
+    let idat_body_len = (out.len() - idat_body_start) as u32;
+    out[idat_len_pos..idat_len_pos + 4].copy_from_slice(&idat_body_len.to_be_bytes());
+    let crc = crc32(&out[idat_start..]);
+    out.extend_from_slice(&crc.to_be_bytes());
+
     write_chunk(&mut out, b"IEND", &[]);
     out
 }
@@ -79,62 +110,55 @@ fn write_chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
     out.extend_from_slice(&crc.to_be_bytes());
 }
 
-// ───────────────────────────── CRC32 ─────────────────────────────
+// ───────────────────────────── CRC32 (table-driven) ─────────────────────────────
 
-const CRC32_POLY: u32 = 0xEDB88320; // IEEE 802.3 反向多项式（PNG/zlib 用的就是这个）
+const CRC32_POLY: u32 = 0xEDB88320; // IEEE 802.3 反向多项式
+
+const CRC32_TABLE: [u32; 256] = {
+    let mut table = [0u32; 256];
+    let mut i = 0u32;
+    while i < 256 {
+        let mut c = i;
+        let mut j = 0;
+        while j < 8 {
+            c = if c & 1 == 1 { (c >> 1) ^ CRC32_POLY } else { c >> 1 };
+            j += 1;
+        }
+        table[i as usize] = c;
+        i += 1;
+    }
+    table
+};
 
 fn crc32(data: &[u8]) -> u32 {
     let mut crc: u32 = 0xFFFF_FFFF;
     for &b in data {
-        let mut x = (crc ^ b as u32) & 0xFF;
-        for _ in 0..8 {
-            x = if x & 1 == 1 { (x >> 1) ^ CRC32_POLY } else { x >> 1 };
-        }
-        crc = (crc >> 8) ^ x;
+        crc = CRC32_TABLE[((crc ^ b as u32) & 0xFF) as usize] ^ (crc >> 8);
     }
     !crc
 }
 
-// ───────────────────────────── Adler-32 ─────────────────────────────
+// ───────────────────────────── Adler-32 (deferred mod) ─────────────────────────────
 
 const ADLER_MOD: u32 = 65521;
 
 fn adler32(data: &[u8]) -> u32 {
     let mut a: u32 = 1;
     let mut b: u32 = 0;
-    for &x in data {
-        a = (a + x as u32) % ADLER_MOD;
-        b = (b + a) % ADLER_MOD;
+    // Deferred mod: process up to NMAX=5552 bytes between mods (max safe before u32 overflow).
+    const NMAX: usize = 5552;
+    let mut i = 0;
+    while i < data.len() {
+        let end = (i + NMAX).min(data.len());
+        for &x in &data[i..end] {
+            a += x as u32;
+            b += a;
+        }
+        a %= ADLER_MOD;
+        b %= ADLER_MOD;
+        i = end;
     }
     (b << 16) | a
-}
-
-// ───────────────────────────── zlib + DEFLATE stored ─────────────────────────────
-
-fn zlib_wrap(raw: &[u8]) -> Vec<u8> {
-    let mut out = Vec::new();
-    // CMF = 0x78：method=8(deflate)，window=7(2^(7+8)=32K)
-    // FLG = 0x01：fdict=0, flevel=0, fcheck 让 CMF*256+FLG ≡ 0 (mod 31)。
-    //  0x78*256 + 0x01 = 30721, 30721 % 31 = 0 ✓
-    out.push(0x78);
-    out.push(0x01);
-    // DEFLATE 流：拆成 ≤ 65535 字节的 stored 块
-    let mut i = 0usize;
-    while i < raw.len() {
-        let block_size = (raw.len() - i).min(65535);
-        let bfinal = i + block_size == raw.len();
-        // 一字节 = BFINAL (bit 0) + BTYPE (bit 1-2 = 00) + 5 padding bits
-        out.push(if bfinal { 0x01 } else { 0x00 });
-        // LEN + NLEN (little-endian)
-        let len = block_size as u16;
-        out.extend_from_slice(&len.to_le_bytes());
-        out.extend_from_slice(&(!len).to_le_bytes());
-        out.extend_from_slice(&raw[i..i + block_size]);
-        i += block_size;
-    }
-    // Adler-32（对原始数据，BE）
-    out.extend_from_slice(&adler32(raw).to_be_bytes());
-    out
 }
 
 // ───────────────────────────── PNG 解码 ─────────────────────────────
