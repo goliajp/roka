@@ -111,6 +111,7 @@ impl Matrix {
     }
 
     /// 全部模块的只读迭代器（row-major）。供评分函数等使用。
+    #[allow(dead_code)]
     pub fn modules_iter(&self) -> std::slice::Iter<'_, bool> {
         self.modules.iter()
     }

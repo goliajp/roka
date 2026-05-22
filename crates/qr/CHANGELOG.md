@@ -12,6 +12,26 @@ All notable changes to `roka-qr` will be documented here. Format based on
   byte mode is emitted; decoder already handles all three).
 - `no_std + alloc` support.
 
+## [0.1.1] — 2026-05-22
+
+### Performance
+
+- Mask scoring rewritten to single-row + single-column pass with the cell
+  reader parameterized as a generic closure (LLVM-inlinable). Rule 1 + 2 + 3 +
+  4 share two matrix sweeps instead of four. Rule 3 uses a rolling 11-bit
+  window in place of the per-position `[bool; 11]` buffer. Encoding an otpauth
+  URI is **≈2× faster** across EC levels:
+  - EcLevel::L: 94 µs → 43 µs
+  - EcLevel::M: 87 µs → 55 µs
+  - EcLevel::Q: 128 µs → 68 µs
+  - EcLevel::H: 174 µs → 105 µs
+- Added a `score_with_mask` variant that virtualises the data mask + format
+  info via a flip table (kept for benchmarking / equivalence-tested but the
+  encoder uses the faster physical-apply path).
+- Equivalence between physical-apply scoring and virtual-flip-table scoring
+  is enforced by `virtual_mask_score_equals_physical` over
+  5 versions × 4 EC levels × 8 masks.
+
 ## [0.1.0] — 2026-05-22
 
 First public-API release.

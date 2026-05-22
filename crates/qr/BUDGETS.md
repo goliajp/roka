@@ -9,13 +9,13 @@ The point is to catch order-of-magnitude regressions, not to chase micro-perf.
 
 | Path | Budget | Best observed (M2, release) | Headroom |
 | --- | ---: | ---: | ---: |
-| `Encoder::build` (otpauth URI, EcLevel::M) | 1.0 ms | ~87 µs | ~11× |
-| `Encoder::build` (otpauth URI, EcLevel::H) | 1.5 ms | ~174 µs | ~9× |
+| `Encoder::build` (otpauth URI, EcLevel::M) | 1.0 ms | ~55 µs | ~18× |
+| `Encoder::build` (otpauth URI, EcLevel::H) | 1.0 ms | ~105 µs | ~10× |
 | `Bitmap::to_png` (V11 @ scale 8) | 1.0 ms | ~234 µs | ~4× |
 | `Bitmap::to_png` (V6 @ scale 8) | 600 µs | ~117 µs | ~5× |
 | `Reader::from_pbm` (V6 otpauth M) | 500 µs | ~98 µs | ~5× |
 | `Reader::from_png` (V6 otpauth M) | 1.0 ms | ~274 µs | ~4× |
-| Round-trip (URI → PNG → URI) | 2.0 ms | ~449 µs | ~4× |
+| Round-trip (URI → PNG → URI) | 2.0 ms | ~400 µs | ~5× |
 
 ## Why these matter
 

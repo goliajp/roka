@@ -67,12 +67,13 @@ Indicative numbers on M2 (release); see [`BUDGETS.md`](BUDGETS.md):
 
 | Operation | Time |
 | --- | ---: |
-| `Encoder::build` (otpauth URI, EcLevel::M) | ~87 µs |
+| `Encoder::build` (otpauth URI, EcLevel::M) | ~55 µs |
+| `Encoder::build` (otpauth URI, EcLevel::H) | ~105 µs |
 | `Bitmap::to_png` (V6 at scale 8) | ~117 µs |
 | `Bitmap::to_png` (V11 at scale 8) | ~234 µs |
 | `Reader::from_pbm` (V6 otpauth M) | ~98 µs |
 | `Reader::from_png` (V6 otpauth M) | ~274 µs |
-| Round-trip (URI → PNG → URI) | ~449 µs |
+| Round-trip (URI → PNG → URI) | ~400 µs |
 
 Regression gates live in [`tests/perf_gate.rs`](tests/perf_gate.rs).
 

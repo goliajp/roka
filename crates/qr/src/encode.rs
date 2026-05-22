@@ -205,7 +205,13 @@ pub fn write_version_info_bits(matrix: &mut Matrix, version: Version) {
     }
 }
 
-/// 选最佳掩码：试遍 8 个、写入 format info、评分；最后留下最佳的状态。
+/// 选最佳掩码：8 个 mask 逐个 apply_mask → write_format_info → score（用 mask.rs 的
+/// 新融合评分）→ unapply_mask；最后一次 apply 最优解。
+///
+/// 我们之前试过"虚拟 mask 评分"（不修改矩阵，用 flip 表 + format info 覆盖），数学上等价，
+/// 但 score 函数读 cell 时多一层 `flip[r*n+c]` indirection，实测反而比物理路径慢——所以
+/// 这里保留物理 apply/unapply，但用 mask.rs 里融合（rule 1 水平 + 2 + 4 一遍扫、rule 3
+/// 滚动 11-bit 窗口）后的 score()，把每 mask 的扫描次数从 4 次降到 3 次。
 fn select_mask_and_write(matrix: &mut Matrix, level: EcLevel) -> u8 {
     let mut best = (0u8, u32::MAX);
     for m in 0u8..8 {
@@ -215,7 +221,7 @@ fn select_mask_and_write(matrix: &mut Matrix, level: EcLevel) -> u8 {
         if s < best.1 {
             best = (m, s);
         }
-        apply_mask(matrix, m);
+        apply_mask(matrix, m); // 反掩码（同 XOR 一次还原数据；format info 由下次 write_ 覆盖）
     }
     apply_mask(matrix, best.0);
     write_format_info_bits(matrix, encode_format(level, best.0));
