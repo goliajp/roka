@@ -2,7 +2,7 @@
 name = "roka-vault"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.97"
 description = "Zero-dependency encrypted vault for TOTP secrets — self-implemented SHA-256, ChaCha20-Poly1305, PBKDF2."
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/goliajp/roka"
